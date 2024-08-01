@@ -961,6 +961,8 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 resample_sr0,
                                 rms_mix_rate0,
                                 protect0,
+                                sid0,
+                                # 'wav'
                             ],
                             [vc_output1, vc_output2],
                             api_name="infer_convert",
