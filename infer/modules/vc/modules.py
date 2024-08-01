@@ -1,12 +1,19 @@
 import traceback
 import logging
+import sys
+import locale
+import re
+
+# import os
 
 logger = logging.getLogger(__name__)
 
 import numpy as np
 import soundfile as sf
 import torch
+from pathlib import Path
 from io import BytesIO
+import os
 
 from infer.lib.audio import load_audio, wav2
 from infer.lib.infer_pack.models import (
@@ -17,6 +24,12 @@ from infer.lib.infer_pack.models import (
 )
 from infer.modules.vc.pipeline import Pipeline
 from infer.modules.vc.utils import *
+
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+os.environ["PYTHONIOENCODING"] = "utf-8"
+locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
 
 
 class VC:
@@ -157,12 +170,19 @@ class VC:
         resample_sr,
         rms_mix_rate,
         protect,
+        spk_item,
+        output_format="wav",
     ):
+
         if input_audio_path is None:
             return "You need to upload an audio", None
+
         f0_up_key = int(f0_up_key)
+
         try:
+
             audio = load_audio(input_audio_path, 16000)
+
             audio_max = np.abs(audio).max() / 0.95
             if audio_max > 1:
                 audio /= audio_max
@@ -172,18 +192,14 @@ class VC:
                 self.hubert_model = load_hubert(self.config)
 
             if file_index:
-                file_index = (
-                    file_index.strip(" ")
-                    .strip('"')
-                    .strip("\n")
-                    .strip('"')
-                    .strip(" ")
-                    .replace("trained", "added")
-                )
+                file_index = file_index.strip().replace("trained", "added")
             elif file_index2:
                 file_index = file_index2
             else:
-                file_index = ""  # 防止小白写错，自动帮他替换掉
+                file_index = ""
+
+            if self.pipeline is None:
+                return "Pipeline not initialized", None
 
             audio_opt = self.pipeline.pipeline(
                 self.hubert_model,
@@ -205,24 +221,45 @@ class VC:
                 protect,
                 f0_file,
             )
-            if self.tgt_sr != resample_sr >= 16000:
-                tgt_sr = resample_sr
-            else:
-                tgt_sr = self.tgt_sr
+
+            tgt_sr = resample_sr if self.tgt_sr != resample_sr >= 16000 else self.tgt_sr
+
             index_info = (
-                "Index:\n%s." % file_index
+                f"Index:\n{file_index}."
                 if os.path.exists(file_index)
                 else "Index not used."
             )
+
+            def clean_filename(filename):
+                return re.sub(r"[^\w\s-]", "", filename)
+
+            if not os.path.exists("results"):
+                os.makedirs("results")
+
+            input_audio_path = input_audio_path.encode("utf-8").decode("utf-8")
+            truncated_basename = clean_filename(Path(input_audio_path).stem)
+            spk_item_name = clean_filename(os.path.splitext(spk_item)[0])
+            output_file_name = f"{truncated_basename}_{spk_item_name}_{f0_method}_{f0_up_key}key.{output_format}"
+            output_file_path = os.path.join("results", output_file_name)
+
+            if os.path.exists(output_file_path):
+                count = 1
+            while os.path.exists(output_file_path):
+                output_file_name = f"{truncated_basename}_{spk_item_name}_{f0_method}_{f0_up_key}key_{count}.{output_format}"
+                output_file_path = os.path.join("results", output_file_name)
+                count += 1
+
+            sf.write(output_file_path, audio_opt, tgt_sr, format=output_format)
+
             return (
-                "Success.\n%s\nTime:\nnpy: %.2fs, f0: %.2fs, infer: %.2fs."
-                % (index_info, *times),
-                (tgt_sr, audio_opt),
+                f"Success.\n{index_info}\nTime:\nnpy: {times[0]:.2f}s, f0: {times[1]:.2f}s, infer: {times[2]:.2f}s.",
+                output_file_path,
             )
-        except:
+        except Exception as e:
+
             info = traceback.format_exc()
             logger.warning(info)
-            return info, (None, None)
+            return str(e), None
 
     def vc_multi(
         self,
