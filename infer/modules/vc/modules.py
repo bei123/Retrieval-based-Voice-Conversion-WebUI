@@ -31,8 +31,11 @@ sys.stderr.reconfigure(encoding="utf-8")
 os.environ["PYTHONIOENCODING"] = "utf-8"
 locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
 
-
 class VC:
+
+    def clean_filename(self, filename):
+        return re.sub(r"[^\w\s-]", "", filename)
+    
     def __init__(self, config):
         self.n_spk = None
         self.tgt_sr = None
@@ -172,25 +175,28 @@ class VC:
         protect,
         spk_item,
         output_format="wav",
+        opt_root="",  # 传入保存路径
     ):
-
         if input_audio_path is None:
             return "You need to upload an audio", None
 
         f0_up_key = int(f0_up_key)
 
         try:
-
+            # 加载音频
             audio = load_audio(input_audio_path, 16000)
 
+            # 规范化音频
             audio_max = np.abs(audio).max() / 0.95
             if audio_max > 1:
                 audio /= audio_max
             times = [0, 0, 0]
 
+            # 加载模型
             if self.hubert_model is None:
                 self.hubert_model = load_hubert(self.config)
 
+            # 处理 file_index
             if file_index:
                 file_index = file_index.strip().replace("trained", "added")
             elif file_index2:
@@ -198,57 +204,68 @@ class VC:
             else:
                 file_index = ""
 
+            # 确保管道已经初始化
             if self.pipeline is None:
                 return "Pipeline not initialized", None
 
-            audio_opt = self.pipeline.pipeline(
-                self.hubert_model,
-                self.net_g,
-                sid,
-                audio,
-                input_audio_path,
-                times,
-                f0_up_key,
-                f0_method,
-                file_index,
-                index_rate,
-                self.if_f0,
-                filter_radius,
-                self.tgt_sr,
-                resample_sr,
-                rms_mix_rate,
-                self.version,
-                protect,
-                f0_file,
-            )
+            # 调用 pipeline
+            try:
+                audio_opt = self.pipeline.pipeline(
+                    self.hubert_model,
+                    self.net_g,
+                    sid,
+                    audio,
+                    input_audio_path,
+                    times,
+                    f0_up_key,
+                    f0_method,
+                    file_index,
+                    index_rate,
+                    self.if_f0,
+                    filter_radius,
+                    self.tgt_sr,
+                    resample_sr,
+                    rms_mix_rate,
+                    self.version,
+                    protect,
+                    f0_file,
+                    # spk_item,  # 如果这个参数需要传递，请确保它在 `pipeline` 方法中定义
+                )
+            except TypeError as e:
+                return f"Pipeline error: {str(e)}", None
 
+            # 确定目标采样率
             tgt_sr = resample_sr if self.tgt_sr != resample_sr >= 16000 else self.tgt_sr
 
+            # 处理索引信息
             index_info = (
                 f"Index:\n{file_index}."
                 if os.path.exists(file_index)
                 else "Index not used."
             )
 
-            def clean_filename(filename):
-                return re.sub(r"[^\w\s-]", "", filename)
+            # 使用 opt_root 目录
+            if opt_root:
+                os.makedirs(opt_root, exist_ok=True)
+            else:
+                opt_root = "results"
+                if not os.path.exists(opt_root):
+                    os.makedirs(opt_root)
 
-            if not os.path.exists("results"):
-                os.makedirs("results")
-
-            input_audio_path = input_audio_path.encode("utf-8").decode("utf-8")
-            truncated_basename = clean_filename(Path(input_audio_path).stem)
-            spk_item_name = clean_filename(os.path.splitext(spk_item)[0])
+            # 生成输出文件名
+            truncated_basename = self.clean_filename(Path(input_audio_path).stem)
+            spk_item_name = self.clean_filename(os.path.splitext(spk_item)[0])
             output_file_name = f"{truncated_basename}_{spk_item_name}_{f0_method}_{f0_up_key}key.{output_format}"
-            output_file_path = os.path.join("results", output_file_name)
+            output_file_path = os.path.join(opt_root, output_file_name)  # 使用 opt_root 目录
 
-            if os.path.exists(output_file_path):
-                count = 1
+            # 检查文件是否已存在，添加计数后缀
+            count = 1
             while os.path.exists(output_file_path):
                 output_file_name = f"{truncated_basename}_{spk_item_name}_{f0_method}_{f0_up_key}key_{count}.{output_format}"
-                output_file_path = os.path.join("results", output_file_name)
+                output_file_path = os.path.join(opt_root, output_file_name)
                 count += 1
 
+            # 写入音频文件
             sf.write(output_file_path, audio_opt, tgt_sr, format=output_format)
 
             return (
@@ -256,46 +273,49 @@ class VC:
                 output_file_path,
             )
         except Exception as e:
-
             info = traceback.format_exc()
             logger.warning(info)
             return str(e), None
 
+
+
     def vc_multi(
-        self,
-        sid,
-        dir_path,
-        opt_root,
-        paths,
-        f0_up_key,
-        f0_method,
-        file_index,
-        file_index2,
-        index_rate,
-        filter_radius,
-        resample_sr,
-        rms_mix_rate,
-        protect,
-        format1,
-    ):
+            self,
+            sid,
+            dir_path,
+            opt_root,
+            paths,
+            f0_up_key,
+            f0_method,
+            file_index,
+            file_index2,
+            index_rate,
+            filter_radius,
+            resample_sr,
+            rms_mix_rate,
+            protect,
+            format1,
+            spk_item
+        ):
         try:
-            dir_path = (
-                dir_path.strip(" ").strip('"').strip("\n").strip('"').strip(" ")
-            )  # 防止小白拷路径头尾带了空格和"和回车
-            opt_root = opt_root.strip(" ").strip('"').strip("\n").strip('"').strip(" ")
+            # 处理路径
+            dir_path = dir_path.strip().strip('"').strip("\n").strip()
+            opt_root = opt_root.strip().strip('"').strip("\n").strip()
             os.makedirs(opt_root, exist_ok=True)
+
+            # 获取文件路径列表
             try:
-                if dir_path != "":
-                    paths = [
-                        os.path.join(dir_path, name) for name in os.listdir(dir_path)
-                    ]
+                if dir_path:
+                    paths = [os.path.join(dir_path, name) for name in os.listdir(dir_path)]
                 else:
                     paths = [path.name for path in paths]
             except:
                 traceback.print_exc()
                 paths = [path.name for path in paths]
+
             infos = []
             for path in paths:
+                # 调用 vc_single 函数
                 info, opt = self.vc_single(
                     sid,
                     path,
@@ -304,38 +324,52 @@ class VC:
                     f0_method,
                     file_index,
                     file_index2,
-                    # file_big_npy,
                     index_rate,
                     filter_radius,
                     resample_sr,
                     rms_mix_rate,
                     protect,
+                    spk_item,
+                    format1,  # 确保传递了所有必要参数
+                    opt_root,
                 )
+
                 if "Success" in info:
                     try:
-                        tgt_sr, audio_opt = opt
-                        if format1 in ["wav", "flac"]:
-                            sf.write(
-                                "%s/%s.%s"
-                                % (opt_root, os.path.basename(path), format1),
-                                audio_opt,
-                                tgt_sr,
-                            )
+                        # 处理路径和文件名
+                        truncated_basename = self.clean_filename(Path(path).stem)
+                        spk_item_name = self.clean_filename(os.path.splitext(spk_item)[0])
+                        output_file_name = f"{truncated_basename}_{spk_item_name}_{f0_method}_{f0_up_key}key.{format1}"
+                        output_file_path = os.path.join(opt_root, output_file_name)
+                        
+                        # 如果文件名已存在，添加计数后缀
+                        count = 1
+                        while os.path.exists(output_file_path):
+                            output_file_name = f"{truncated_basename}_{spk_item_name}_{f0_method}_{f0_up_key}key_{count}.{format1}"
+                            output_file_path = os.path.join(opt_root, output_file_name)
+                            count += 1
+
+                        # 确保 opt 是一个包含两个元素的元组
+                        if isinstance(opt, tuple) and len(opt) == 2:
+                            tgt_sr, audio_opt = opt
+                            if format1 in ["wav", "flac"]:
+                                sf.write(output_file_path, audio_opt, tgt_sr, format=format1)
+                            else:
+                                with BytesIO() as wavf:
+                                    sf.write(wavf, audio_opt, tgt_sr, format="wav")
+                                    wavf.seek(0, 0)
+                                    with open(output_file_path, "wb") as outf:
+                                        wav2(wavf, outf, format1)
                         else:
-                            path = "%s/%s.%s" % (
-                                opt_root,
-                                os.path.basename(path),
-                                format1,
-                            )
-                            with BytesIO() as wavf:
-                                sf.write(wavf, audio_opt, tgt_sr, format="wav")
-                                wavf.seek(0, 0)
-                                with open(path, "wb") as outf:
-                                    wav2(wavf, outf, format1)
-                    except:
+                            info += "Unexpected output format from vc_single."
+
+                    except Exception as e:
                         info += traceback.format_exc()
-                infos.append("%s->%s" % (os.path.basename(path), info))
-                yield "\n".join(infos)
+
+                infos.append(f"{os.path.basename(path)} -> {info}")
+
             yield "\n".join(infos)
-        except:
+        except Exception as e:
             yield traceback.format_exc()
+
+
