@@ -118,7 +118,7 @@ if __name__ == "__main__":
             self.pth_path: str = ""
             self.index_path: str = ""
             self.pitch: int = 0
-            self.formant=0.0
+            self.formant = 0.0
             self.sr_type: str = "sr_model"
             self.block_time: float = 0.25  # s
             self.threhold: int = -60
@@ -670,7 +670,7 @@ if __name__ == "__main__":
             if len(values["index_path"].strip()) == 0:
                 sg.popup(i18n("请选择index文件"))
                 return False
-            pattern = re.compile("[^\x00-\x7F]+")
+            pattern = re.compile("[^\x00-\x7f]+")
             if pattern.findall(values["pth_path"]):
                 sg.popup(i18n("pth文件路径不可包含中文"))
                 return False
@@ -840,12 +840,12 @@ if __name__ == "__main__":
                 self.audio_proc = AudioIoProcess(
                     input_device=sd.default.device[0],
                     output_device=sd.default.device[1],
-                    input_audio_block_size = self.block_frame,
-                    sample_rate = self.gui_config.samplerate,
+                    input_audio_block_size=self.block_frame,
+                    sample_rate=self.gui_config.samplerate,
                     channel_num=self.gui_config.channels,
                     is_input_wasapi_exclusive=wasapi_exclusive,
                     is_output_wasapi_exclusive=wasapi_exclusive,
-                    is_device_combined = True
+                    is_device_combined=True,
                     # TODO: Add control UI to allow devices with different type API & different WASAPI settings
                 )
                 self.in_mem = SharedMemory(name=self.audio_proc.get_in_mem_name())
@@ -854,19 +854,17 @@ if __name__ == "__main__":
                     self.audio_proc.get_np_shape(),
                     dtype=self.audio_proc.get_np_dtype(),
                     buffer=self.in_mem.buf,
-                    order='C'
+                    order="C",
                 )
                 self.out_buf = np.ndarray(
                     self.audio_proc.get_np_shape(),
                     dtype=self.audio_proc.get_np_dtype(),
                     buffer=self.out_mem.buf,
-                    order='C'
+                    order="C",
                 )
-                self.in_ptr, \
-                self.out_ptr, \
-                self.play_ptr, \
-                self.in_evt, \
-                self.stop_evt = self.audio_proc.get_ptrs_and_events()
+                self.in_ptr, self.out_ptr, self.play_ptr, self.in_evt, self.stop_evt = (
+                    self.audio_proc.get_ptrs_and_events()
+                )
 
                 self.audio_proc.start()
 
@@ -874,10 +872,7 @@ if __name__ == "__main__":
                     while flag_vc:
                         self.audio_infer(self.block_frame << 1)
 
-                threading.Thread(
-                    target=audio_loop,
-                    daemon=True
-                ).start()
+                threading.Thread(target=audio_loop, daemon=True).start()
 
         def stop_stream(self):
             global flag_vc
@@ -891,9 +886,7 @@ if __name__ == "__main__":
                     self.audio_proc.join()
                     self.audio_proc = None
 
-        def audio_infer(
-            self, buf_size:int # 2 * self.block_frame
-        ):
+        def audio_infer(self, buf_size: int):  # 2 * self.block_frame
             """
             音频处理
             """
@@ -902,7 +895,7 @@ if __name__ == "__main__":
             self.in_evt.wait()
             rptr = self.in_ptr.value
             self.in_evt.clear()
-            
+
             start_time = time.perf_counter()
 
             rend = rptr + self.block_frame
